@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>בונה הפעולות</title>
+<style>
+:root{--bg:#f6f4ec;--card:#fff;--tx:#1f2a1f;--mu:#5d6b5d;--ac:#2f6b3a;--ac2:#e9f2ea;--bd:#d9ddd0;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#131a14;--card:#1c261d;--tx:#eaf0ea;--mu:#9fb09f;--ac:#6fc07d;--ac2:#243427;--bd:#2f3d31}}
+:root[data-theme="dark"]{--bg:#131a14;--card:#1c261d;--tx:#eaf0ea;--mu:#9fb09f;--ac:#6fc07d;--ac2:#243427;--bd:#2f3d31}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font-family:system-ui,-apple-system,"Segoe UI",Arial,sans-serif;line-height:1.6}
+main{max-width:720px;margin:0 auto;padding:16px}
+h1{font-size:1.6rem;margin:8px 0 2px}
+.sub{color:var(--mu);margin:0 0 16px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:16px;padding:16px;margin-bottom:16px}
+label{display:block;font-weight:600;margin:12px 0 4px}
+select,input,textarea{width:100%;font:inherit;padding:12px;border:1px solid var(--bd);border-radius:12px;background:var(--bg);color:var(--tx)}
+textarea{min-height:90px;resize:vertical}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+button{font:inherit;font-weight:700;border:0;border-radius:12px;padding:14px 18px;background:var(--ac);color:#fff;width:100%;margin-top:16px;min-height:48px}
+button.sec{background:var(--ac2);color:var(--ac);margin-top:10px}
+button:disabled{opacity:.6}
+#out h2{font-size:1.25rem;color:var(--ac);border-bottom:2px solid var(--ac2);padding-bottom:4px;margin:20px 0 8px}
+#out h3{font-size:1.05rem;margin:14px 0 4px}
+#out ul{padding-inline-start:22px;margin:6px 0}
+#out p{margin:6px 0}
+.err{color:#b3261e;font-weight:600}
+.note{font-size:.85rem;color:var(--mu);text-align:center}
+</style>
+</head>
+<body>
+<main>
+<h1>🏕️ בונה הפעולות</h1>
+<p class="sub">ספרו מה אתם צריכים, והבינה המלאכותית תבנה לכם פעולה מוכנה במבנה הקלאסי: פתיחה, גוף וסיכום.</p>
+
+<div class="card">
+<label for="mv">תנועה</label>
+<select id="mv"><option>צופים</option><option>הנוער העובד והלומד</option><option>בני עקיבא</option><option>השומר הצעיר</option><option>המחנות העולים</option><option>אחר / כללי</option></select>
+<div class="row">
+<div><label for="age">שכבת גיל</label>
+<select id="age"><option>כיתות ב׳–ג׳</option><option>כיתות ד׳–ה׳</option><option>כיתות ו׳–ז׳</option><option selected>כיתות ח׳–ט׳</option><option>כיתות י׳–י״ב</option></select></div>
+<div><label for="dur">משך (דקות)</label><input id="dur" type="number" value="60" min="15" max="180" inputmode="numeric"></div>
+</div>
+<div class="row">
+<div><label for="grp">מספר חניכים</label><input id="grp" type="number" value="15" min="2" max="100" inputmode="numeric"></div>
+<div><label for="set">מקום</label>
+<select id="set"><option>בסניף</option><option>בחוץ</option><option>בזום</option><option>בשבת (ללא אלקטרוניקה)</option></select></div>
+</div>
+<label for="top">נושא או מטרה</label>
+<input id="top" placeholder="למשל: אחריות, אמון, עבודת צוות, פעולת פתיחה">
+<label for="ext">בקשות מיוחדות</label>
+<textarea id="ext" placeholder="למשל: הרבה משחקים, מעט דיונים, בלי ציוד מיוחד, עם צ׳ופר בסוף"></textarea>
+<button id="go">בנו לי פעולה ✨</button>
+</div>
+
+<div class="card" id="res" hidden>
+<div id="out"></div>
+<button class="sec" id="cp">העתקה</button>
+<button class="sec" id="again">עוד גרסה אחרת</button>
+</div>
+<p class="note">הפעולות נוצרות על ידי בינה מלאכותית. תמיד כדאי לעבור עליהן ולהתאים לקבוצה שלכם.</p>
+</main>
+
+<script>
+(function(){
+var $=function(i){return document.getElementById(i)};
+var last="",busy=false;
+
+function esc(s){return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")}
+function inline(s){return esc(s).replace(/\*\*(.+?)\*\*/g,"<b>$1</b>")}
+function render(md){
+  var lines=md.split("\n"),h="",ul=false;
+  lines.forEach(function(l){
+    var t=l.trim();
+    var li=/^[-*•]\s+(.*)/.exec(t);
+    if(li){if(!ul){h+="<ul>";ul=true}h+="<li>"+inline(li[1])+"</li>";return}
+    if(ul){h+="</ul>";ul=false}
+    if(!t)return;
+    if(/^##\s/.test(t))h+="<h2>"+inline(t.replace(/^#+\s*/,""))+"</h2>";
+    else if(/^#\s/.test(t))h+="<h2>"+inline(t.replace(/^#+\s*/,""))+"</h2>";
+    else if(/^###\s/.test(t))h+="<h3>"+inline(t.replace(/^#+\s*/,""))+"</h3>";
+    else h+="<p>"+inline(t)+"</p>";
+  });
+  if(ul)h+="</ul>";
+  return h;
+}
+
+async function gen(variant){
+  if(busy)return;
+  busy=true;$("go").disabled=true;$("again").disabled=true;
+  $("res").hidden=false;$("out").innerHTML="<p>בונה פעולה... זה לוקח כחצי דקה</p>";
+  $("res").scrollIntoView({behavior:"smooth"});
+  try{
+    var body={mv:$("mv").value,age:$("age").value,dur:$("dur").value,grp:$("grp").value,set:$("set").value,top:$("top").value,ext:$("ext").value,variant:!!variant};
+    var r=await fetch("/api/peula",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+    var d=await r.json();
+    if(!r.ok)throw new Error(d.error||"err");
+    last=d.text;$("out").innerHTML=render(last);
+  }catch(e){
+    $("out").innerHTML='<p class="err">'+esc(e.message&&e.message!=="err"?e.message:"משהו השתבש, נסו שוב.")+'</p>';
+  }
+  busy=false;$("go").disabled=false;$("again").disabled=false;
+}
+
+$("go").onclick=function(){gen(false)};
+$("again").onclick=function(){gen(true)};
+$("cp").onclick=async function(){
+  try{await navigator.clipboard.writeText(last);$("cp").textContent="הועתק ✓"}catch(e){$("cp").textContent="ההעתקה לא נתמכת, סמנו ידנית"}
+  setTimeout(function(){$("cp").textContent="העתקה"},2000);
+};
+})();
+</script>
+</body>
+</html>
