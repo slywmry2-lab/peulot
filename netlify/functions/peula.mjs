@@ -51,22 +51,45 @@ export default async (req) => {
   try {
     for (const model of MODELS) {
       for (let attempt = 0; attempt < 2; attempt++) {
-        const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "x-goog-api-key": key },
-          body,
-        });
-        if (r.ok) {
-          const d = await r.json();
-          const text = (d.candidates?.[0]?.content?.parts || []).map((p) => p.text || "").join("");
-          if (text) return json({ text });
-          lastStatus = 200; lastWhy = "תשובה ריקה";
-          break; // מנסים מודל גיבוי
+        const r = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse`,
+          { method: "POST", headers: { "Content-Type": "application/json", "x-goog-api-key": key }, body }
+        );
+        if (r.ok && r.body) {
+          // מזרימים את הטקסט ישר לדפדפן, כך שאין חריגה מזמן התגובה של Netlify
+          const enc = new TextEncoder(), dec = new TextDecoder();
+          const stream = new ReadableStream({
+            async start(ctrl) {
+              const rd = r.body.getReader();
+              let buf = "";
+              try {
+                for (;;) {
+                  const { done, value } = await rd.read();
+                  if (done) break;
+                  buf += dec.decode(value, { stream: true });
+                  const lines = buf.split("\n");
+                  buf = lines.pop();
+                  for (const ln of lines) {
+                    if (!ln.startsWith("data:")) continue;
+                    try {
+                      const d = JSON.parse(ln.slice(5));
+                      const t = (d.candidates?.[0]?.content?.parts || []).map((x) => x.text || "").join("");
+                      if (t) ctrl.enqueue(enc.encode(t));
+                    } catch {}
+                  }
+                }
+              } catch {}
+              ctrl.close();
+            },
+          });
+          return new Response(stream, {
+            headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-cache" },
+          });
         }
         lastStatus = r.status;
         try { lastWhy = (await r.json())?.error?.message || ""; } catch { lastWhy = ""; }
-        if (r.status === 503 || r.status === 500) { await new Promise((ok) => setTimeout(ok, 800)); continue; } // עומס: ניסיון חוזר
-        break; // 404/429/400: עוברים למודל הבא (או מסיימים)
+        if (r.status === 503 || r.status === 500) { await new Promise((ok) => setTimeout(ok, 800)); continue; }
+        break;
       }
     }
     if (lastStatus === 429) return json({ error: "האתר עמוס כרגע (המכסה החינמית של היום או הדקה נגמרה). נסו שוב בעוד כמה דקות." }, 429);
