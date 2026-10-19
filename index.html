@@ -27,6 +27,20 @@ button:disabled{opacity:.6}
 #out p{margin:6px 0}
 .err{color:#b3261e;font-weight:600}
 .note{font-size:.85rem;color:var(--mu);text-align:center}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+.chip{width:auto;margin:0;padding:8px 14px;min-height:40px;border-radius:20px;font-weight:600;background:var(--ac2);color:var(--ac)}
+.chk{display:flex;align-items:center;gap:10px;margin-top:12px;font-weight:600}
+.chk input{width:24px;height:24px}
+.btns{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:16px}
+.btns button{margin:0}
+.rf{display:flex;gap:8px;margin-top:12px}
+.rf input{flex:1}
+.rf button{width:auto;margin:0}
+.warn{background:#fff4d6;color:#6b4e00;border-radius:12px;padding:10px 12px;margin-top:12px;font-size:.9rem}
+.hrow{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--bd)}
+.hrow span{flex:1}
+.mini{width:auto;margin:0;padding:8px 12px;min-height:40px;font-size:.9rem}
+@media print{main>*:not(#res){display:none}#res .btns,#res .rf,#chk{display:none}body{background:#fff;color:#000}.card{border:0}}
 </style>
 </head>
 <body>
@@ -49,16 +63,28 @@ button:disabled{opacity:.6}
 </div>
 <label for="top">נושא או מטרה</label>
 <input id="top" placeholder="למשל: אחריות, אמון, עבודת צוות, פעולת פתיחה">
+<div class="chips" id="chips"></div>
 <label for="ext">בקשות מיוחדות</label>
-<textarea id="ext" placeholder="למשל: הרבה משחקים, מעט דיונים, בלי ציוד מיוחד, עם צ׳ופר בסוף"></textarea>
+<textarea id="ext" placeholder="למשל: לכלול שיר מסוים, משחק תפיסה בפתיחה, הרבה משחקים ומעט דיון"></textarea>
+<label for="sty">אופי הפעולה</label>
+<select id="sty"><option value="bal">מאוזן: משחק ותוכן</option><option value="games">יותר משחקים</option><option value="talk">יותר דיון ושיח</option></select>
+<label class="chk"><input type="checkbox" id="ng"> בלי ציוד מיוחד</label>
 <button id="go">בנו לי פעולה ✨</button>
 </div>
 
 <div class="card" id="res" hidden>
 <div id="out"></div>
+<p class="warn" id="chk" hidden></p>
+<div class="btns">
 <button class="sec" id="cp">העתקה</button>
+<button class="sec" id="wa">שיתוף</button>
+<button class="sec" id="dl">הורדה כקובץ</button>
+<button class="sec" id="pr">הדפסה</button>
+</div>
+<div class="rf"><input id="rf" placeholder="למשל: הוסיפו עוד שאלות לדיון"><button class="sec" id="rfb">שנו לי</button></div>
 <button class="sec" id="again">עוד גרסה אחרת</button>
 </div>
+<div class="card" id="hist" hidden><strong>הפעולות שלי (נשמרות במכשיר הזה)</strong><div id="hl"></div></div>
 <p class="note">הפעולות נוצרות על ידי בינה מלאכותית. תמיד כדאי לעבור עליהן ולהתאים לקבוצה שלכם.</p>
 </main>
 
@@ -86,25 +112,83 @@ function render(md){
   return h;
 }
 
-async function gen(variant){
+async function gen(variant,refine){
   if(busy)return;
-  busy=true;$("go").disabled=true;$("again").disabled=true;
-  $("res").hidden=false;$("out").innerHTML="<p>בונה פעולה...</p>";
+  busy=true;$("go").disabled=true;$("again").disabled=true;$("rfb").disabled=true;
+  var prevText=last;
+  $("res").hidden=false;$("chk").hidden=true;$("out").innerHTML="<p>בונה פעולה... אפשר לראות אותה נכתבת</p>";
   $("res").scrollIntoView({behavior:"smooth"});
   try{
-    var body={mv:$("mv").value,age:$("age").value,dur:$("dur").value,grp:$("grp").value,set:$("set").value,top:$("top").value,ext:$("ext").value,variant:!!variant};
-    var r=await fetch("/api/peula",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
-    var ct=r.headers.get("content-type")||"";
-    if(ct.indexOf("application/json")>-1){var d=await r.json();throw new Error(d.error||"שגיאה, נסו שוב.");}
-    if(!r.ok||!r.body)throw new Error("השרת לא ענה כמו שצריך ("+r.status+"). נסו שוב בעוד רגע.");
-    var rd=r.body.getReader(),dec=new TextDecoder(),acc="";
-    for(;;){var x=await rd.read();if(x.done)break;acc+=dec.decode(x.value,{stream:true});last=acc;$("out").innerHTML=render(acc);}
+    var body={mv:$("mv").value,age:$("age").value,dur:$("dur").value,grp:$("grp").value,set:$("set").value,top:$("top").value,ext:$("ext").value,sty:$("sty").value,ng:$("ng").checked,variant:!!variant};
+    if(refine){body.refine=refine;body.prev=prevText.slice(0,12000)}
+    var acc="";
+    for(var t=0;t<2&&!acc.trim();t++){
+      var r=await fetch("/api/peula",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+      var ct=r.headers.get("content-type")||"";
+      if(ct.indexOf("application/json")>-1){var d=await r.json();throw new Error(d.error||"שגיאה, נסו שוב.");}
+      if(!r.ok||!r.body)throw new Error("השרת לא ענה כמו שצריך ("+r.status+"). נסו שוב בעוד רגע.");
+      var rd=r.body.getReader(),dec=new TextDecoder();acc="";
+      for(;;){var x=await rd.read();if(x.done)break;acc+=dec.decode(x.value,{stream:true});last=acc;$("out").innerHTML=render(acc);}
+    }
     if(!acc.trim())throw new Error("לא התקבלה תשובה, נסו שוב.");
+    addHist(acc);checkTimes(acc,parseInt($("dur").value,10)||60);
   }catch(e){
-    $("out").innerHTML='<p class="err">'+esc(e.message||"משהו השתבש, נסו שוב.")+'</p>';
+    var msg='<p class="err">'+esc(e.message||"משהו השתבש, נסו שוב.")+'</p>';
+    if(refine&&prevText){last=prevText;$("out").innerHTML=render(prevText)+msg}else $("out").innerHTML=msg;
   }
-  busy=false;$("go").disabled=false;$("again").disabled=false;
+  busy=false;$("go").disabled=false;$("again").disabled=false;$("rfb").disabled=false;
 }
+
+/* ---------- פונקציות חדשות ---------- */
+var HK="peulot_v1";
+function hget(){try{return JSON.parse(localStorage.getItem(HK)||"[]")}catch(e){return []}}
+function hset(a){try{localStorage.setItem(HK,JSON.stringify(a.slice(0,30)))}catch(e){}}
+function titleOf(md){var m=/^#\s*(.+)$/m.exec(md);return m?m[1].replace(/\*/g,"").trim():($("top").value||"פעולה")}
+function plain(md){return md.replace(/\*\*/g,"").replace(/^#+\s*/gm,"")}
+function addHist(md){var a=hget();a.unshift({t:titleOf(md),d:new Date().toLocaleDateString("he-IL"),m:md});hset(a);drawHist()}
+function drawHist(){
+  var a=hget(),box=$("hl");$("hist").hidden=!a.length;box.textContent="";
+  a.forEach(function(it,i){
+    var row=document.createElement("div");row.className="hrow";
+    var sp=document.createElement("span");sp.textContent=it.t+" · "+it.d;
+    var o=document.createElement("button");o.className="sec mini";o.textContent="פתיחה";
+    o.onclick=function(){last=it.m;$("res").hidden=false;$("chk").hidden=true;$("out").innerHTML=render(last);$("res").scrollIntoView({behavior:"smooth"})};
+    var x=document.createElement("button");x.className="sec mini";x.textContent="מחיקה";
+    x.onclick=function(){var b=hget();b.splice(i,1);hset(b);drawHist()};
+    row.appendChild(sp);row.appendChild(o);row.appendChild(x);box.appendChild(row);
+  });
+}
+function checkTimes(md,dur){
+  var sum=0,found=0;
+  md.split("\n").forEach(function(l){
+    l=l.trim();if(!/^##\s/.test(l))return;
+    var m=/\(([^)]*)\)\s*$/.exec(l);if(!m)return;
+    var hh=/(\d+)\s*שעה/.exec(m[1]),mm=/(\d+)\s*דקות/.exec(m[1]);
+    if(!hh&&!mm)return;
+    sum+=(hh?60*(+hh[1]):0)+(mm?+mm[1]:0);found++;
+  });
+  var el=$("chk");
+  if(found&&sum!==dur){el.textContent="שימו לב: סכום הזמנים בפעולה הוא "+sum+" דקות ולא "+dur+". אפשר לכתוב למטה “תקנו את הזמנים” וללחוץ על “שנו לי”.";el.hidden=false}
+  else el.hidden=true;
+}
+['אחריות','אמון','עבודת צוות','גבולות','שייכות לקבוצה','התמודדות עם פחד','חברות','ערבות הדדית','סבלנות','נתינה'].forEach(function(t){
+  var c=document.createElement("button");c.type="button";c.className="chip";c.textContent=t;
+  c.onclick=function(){$("top").value=t};$("chips").appendChild(c);
+});
+$("wa").onclick=function(){
+  if(!last)return;var t=plain(last).slice(0,3500);
+  if(navigator.share){navigator.share({text:t}).catch(function(){})}
+  else window.open("https://wa.me/?text="+encodeURIComponent(t),"_blank");
+};
+$("dl").onclick=function(){
+  if(!last)return;
+  var b=new Blob(["\ufeff"+plain(last)],{type:"text/plain;charset=utf-8"});
+  var a=document.createElement("a");a.href=URL.createObjectURL(b);a.download=titleOf(last).slice(0,40)+".txt";
+  document.body.appendChild(a);a.click();a.remove();
+};
+$("pr").onclick=function(){window.print()};
+$("rfb").onclick=function(){var v=$("rf").value.trim();if(!v||!last)return;$("rf").value="";gen(false,v)};
+drawHist();
 
 $("go").onclick=function(){gen(false)};
 $("again").onclick=function(){gen(true)};
