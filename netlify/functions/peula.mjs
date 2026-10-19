@@ -13,6 +13,10 @@ const GUIDE = `אתה מדריך ותיק בתנועת נוער בישראל ש�
 - התאם לגיל, לגודל הקבוצה ולמקום. בשבת אין ציוד אלקטרוני.
 - אם הנושא כולל שיר, סרט או ספר: מזכירים את שמו ומסבירים במילים שלך על מה הוא, בלי לצטט מילים מהשיר או קטעים מהיצירה.
 - נושאים רגישים מטפלים בעדינות ובהתאמה לגיל.
+- תכנן את הזרימה: רעיון מרכזי אחד שחוזר בכל הבלוקים, ומעבר טבעי בין בלוק לבלוק.
+- כל משחק חייב להתאים למספר החניכים ולמקום ולהיות באמת אפשרי להעברה. העדף משחקים מוכרים ומוכחים בתנועות נוער והסבר אותם עד הסוף.
+- בלי קלישאות ובלי משפטים כלליים: בכל מתודה משהו מעשי שהמדריך יכול לומר או לעשות מיד.
+- אורך: עד כ-12 מילים לכל דקה של פעולה, בלי למלא.
 - בלי הקדמות, התנצלויות או הערות על עצמך. רק את הפעולה.
 
 פורמט הפלט (markdown): שורה ראשונה "# שם הפעולה", אחריה **נושא**, **שאלה מרכזית**, **מטרות** ו-**ציוד**, ואז כל בלוק ככותרת "## 🫡 זמן מפקד: התכנסות (10 דקות)" ומתחתיו שורות בפורמט "**מתודה 1 (10 דקות):** טקסט".
@@ -38,6 +42,9 @@ const GUIDE = `אתה מדריך ותיק בתנועת נוער בישראל ש�
 **מתודה 1 (10 דקות):** משחקים 10 שניות מתחת למים.`;
 
 const STY = { bal: "איזון בין משחק לתוכן", games: "יותר משחק ופחות דיון", talk: "יותר דיון ושיח ופחות משחק" };
+// מנסים קודם לצמצם את "החשיבה" של המודל כדי לענות מהר. אם המודל לא תומך, עוברים לאפשרות הבאה.
+const CFGS = [{ thinkingConfig: { thinkingLevel: "low" } }, { thinkingConfig: { thinkingBudget: 0 } }, {}];
+let okCfg = null; // ההגדרה שעבדה, נשמרת כל עוד הפונקציה פעילה
 const hits = new Map(); // הגבלת בקשות פשוטה לפי כתובת IP (best effort)
 const MAX_PER_HOUR = 8;
 
@@ -83,20 +90,23 @@ export default async (req) => {
     .replace(/^["']|["']$/g, "");
   if (!key) return json({ error: "המפתח לא נמצא בשרת. בדקו שהמשתנה GEMINI_API_KEY קיים ב-Netlify ועשו Deploy מחדש." }, 500);
 
-  const body = JSON.stringify({
-    contents: [{ role: "user", parts: [{ text: prompt }] }],
-    generationConfig: { maxOutputTokens: 8000, temperature: 0.9 },
-  });
+  const mk = (cfg) =>
+    JSON.stringify({
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      generationConfig: { maxOutputTokens: 6000, temperature: 0.8, ...cfg },
+    });
 
   let lastStatus = 0, lastWhy = "";
   try {
     for (const model of MODELS) {
+      for (const cfg of okCfg ? [okCfg] : CFGS) {
       for (let attempt = 0; attempt < 2; attempt++) {
         const r = await fetch(
           `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse`,
-          { method: "POST", headers: { "Content-Type": "application/json", "x-goog-api-key": key }, body }
+          { method: "POST", headers: { "Content-Type": "application/json", "x-goog-api-key": key }, body: mk(cfg) }
         );
         if (r.ok && r.body) {
+          okCfg = cfg;
           // מזרימים את הטקסט ישר לדפדפן, כך שאין חריגה מזמן התגובה של Netlify
           const enc = new TextEncoder(), dec = new TextDecoder();
           const stream = new ReadableStream({
@@ -129,9 +139,13 @@ export default async (req) => {
         }
         lastStatus = r.status;
         try { lastWhy = (await r.json())?.error?.message || ""; } catch { lastWhy = ""; }
-        if (r.status === 503 || r.status === 500) { await new Promise((ok) => setTimeout(ok, 800)); continue; }
+        if (r.status === 503 || r.status === 500) { await new Promise((ok) => setTimeout(ok, 400)); continue; }
         break;
       }
+      // רק שגיאת 400 על הגדרת החשיבה מצדיקה ניסיון עם הגדרה אחרת
+      if (lastStatus !== 400 || /API key|permission/i.test(lastWhy)) break;
+      }
+      if (/API key/i.test(lastWhy) || lastStatus === 403) break;
     }
     if (lastStatus === 429) return json({ error: "האתר עמוס כרגע (המכסה החינמית של היום או הדקה נגמרה). נסו שוב בעוד כמה דקות." }, 429);
     if (lastStatus === 400 || lastStatus === 403) return json({ error: "המפתח של Gemini לא תקין או לא פעיל. צרו מפתח חדש ב-AI Studio, הדביקו ב-Netlify ועשו Deploy. (" + lastStatus + ") " + lastWhy.slice(0, 150) }, 502);
