@@ -89,16 +89,19 @@ function render(md){
 async function gen(variant){
   if(busy)return;
   busy=true;$("go").disabled=true;$("again").disabled=true;
-  $("res").hidden=false;$("out").innerHTML="<p>בונה פעולה... זה לוקח כחצי דקה</p>";
+  $("res").hidden=false;$("out").innerHTML="<p>בונה פעולה...</p>";
   $("res").scrollIntoView({behavior:"smooth"});
   try{
     var body={mv:$("mv").value,age:$("age").value,dur:$("dur").value,grp:$("grp").value,set:$("set").value,top:$("top").value,ext:$("ext").value,variant:!!variant};
     var r=await fetch("/api/peula",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
-    var d=await r.json();
-    if(!r.ok)throw new Error(d.error||"err");
-    last=d.text;$("out").innerHTML=render(last);
+    var ct=r.headers.get("content-type")||"";
+    if(ct.indexOf("application/json")>-1){var d=await r.json();throw new Error(d.error||"שגיאה, נסו שוב.");}
+    if(!r.ok||!r.body)throw new Error("השרת לא ענה כמו שצריך ("+r.status+"). נסו שוב בעוד רגע.");
+    var rd=r.body.getReader(),dec=new TextDecoder(),acc="";
+    for(;;){var x=await rd.read();if(x.done)break;acc+=dec.decode(x.value,{stream:true});last=acc;$("out").innerHTML=render(acc);}
+    if(!acc.trim())throw new Error("לא התקבלה תשובה, נסו שוב.");
   }catch(e){
-    $("out").innerHTML='<p class="err">'+esc(e.message&&e.message!=="err"?e.message:"משהו השתבש, נסו שוב.")+'</p>';
+    $("out").innerHTML='<p class="err">'+esc(e.message||"משהו השתבש, נסו שוב.")+'</p>';
   }
   busy=false;$("go").disabled=false;$("again").disabled=false;
 }
