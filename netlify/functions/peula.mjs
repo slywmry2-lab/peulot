@@ -47,7 +47,12 @@ export default async (req) => {
       }),
     });
     if (r.status === 429) return json({ error: "האתר עמוס כרגע, נסו שוב בעוד כמה דקות." }, 429);
-    if (!r.ok) return json({ error: "שגיאה בשירות ה-AI (" + r.status + ")" }, 502);
+    if (!r.ok) {
+      let why = "";
+      try { why = (await r.json())?.error?.message || ""; } catch {}
+      const hasKey = Boolean(process.env.GEMINI_API_KEY);
+      return json({ error: "שגיאה בשירות ה-AI (" + r.status + "). " + (hasKey ? "" : "המפתח לא נמצא בשרת. ") + why.slice(0, 200) }, 502);
+    }
     const d = await r.json();
     const text = (d.candidates?.[0]?.content?.parts || []).map((p) => p.text || "").join("");
     if (!text) return json({ error: "לא התקבלה תשובה, נסו שוב." }, 502);
