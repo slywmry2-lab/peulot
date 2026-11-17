@@ -1,9 +1,7 @@
-// Netlify Function: בונה פעולות עם NVIDIA NIM (מסלול חינמי)
-// המפתח נשמר ב-Netlify כמשתנה סביבה בשם NVIDIA_API_KEY, לא בקוד.
+// Netlify Function: בונה פעולות עם Gemini (מסלול חינמי)
+// המפתח נשמר ב-Netlify כמשתנה סביבה בשם GEMINI_API_KEY, לא בקוד.
 
-const API_URL = "https://integrate.api.nvidia.com/v1/chat/completions";
-// אפשר להחליף את המודל בלי לגעת בקוד: משתנה NVIDIA_MODEL ב-Netlify. השמות המלאים ב-build.nvidia.com/models
-const MODELS = ["meta/llama-3.3-70b-instruct", "deepseek-ai/deepseek-v3.2"];
+const MODELS = ["gemini-flash-latest", "gemini-flash-lite-latest"]; // אם הראשון לא זמין, עובר לגיבוי
 const GUIDE = `אתה מדריך ותיק בתנועת נוער בישראל שכותב מערכי פעולה כמו בנאדם: בגוף ראשון, כמו שמדריך באמת מתכנן את הפעולה שלו לעצמו ולצוות. לא כמו מסמך רשמי ולא כמו בינה מלאכותית.
 
 כללי כתיבה:
@@ -44,6 +42,9 @@ const GUIDE = `אתה מדריך ותיק בתנועת נוער בישראל ש�
 **מתודה 1 (10 דקות):** משחקים 10 שניות מתחת למים.`;
 
 const STY = { bal: "איזון בין משחק לתוכן", games: "יותר משחק ופחות דיון", talk: "יותר דיון ושיח ופחות משחק" };
+// מנסים קודם לצמצם את "החשיבה" של המודל כדי לענות מהר. אם המודל לא תומך, עוברים לאפשרות הבאה.
+const CFGS = [{ thinkingConfig: { thinkingLevel: "low" } }, { thinkingConfig: { thinkingBudget: 0 } }, {}];
+let okCfg = null; // ההגדרה שעבדה, נשמרת כל עוד הפונקציה פעילה
 const hits = new Map(); // הגבלת בקשות פשוטה לפי כתובת IP (best effort)
 const MAX_PER_HOUR = 8;
 
@@ -84,73 +85,72 @@ export default async (req) => {
         `\nכתוב את הפעולה המתוקנת במלואה, באותו פורמט ובאותו סגנון, וסכום הדקות חייב להישאר ${dur}. שנה רק את מה שהתבקש.\n`
       : basePrompt;
 
-  const key = (process.env.NVIDIA_API_KEY || "").trim().replace(/^["']|["']$/g, "");
+  const key = (process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "")
+    .trim()
+    .replace(/^["']|["']$/g, "");
   if (!key) {
-    return json({ error: "מפתח NVIDIA לא נמצא בשרת. הוסיפו את המשתנה NVIDIA_API_KEY ב-Netlify ועשו Deploy מחדש." }, 500);
+    return json({ error: "המפתח לא נמצא בשרת. בדקו שהמשתנה GEMINI_API_KEY קיים ב-Netlify ועשו Deploy מחדש." }, 500);
   }
 
-  const models = [process.env.NVIDIA_MODEL, ...MODELS].filter((m, n, a) => m && a.indexOf(m) === n);
+  const mk = (cfg) =>
+    JSON.stringify({
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      generationConfig: { maxOutputTokens: 6000, temperature: 0.8, ...cfg },
+    });
+
   let lastStatus = 0, lastWhy = "";
   try {
-    for (const model of models) {
-      for (let attempt = 0; attempt < 2; attempt++) {
-        const r = await fetch(API_URL, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: "Bearer " + key, Accept: "text/event-stream" },
-          body: JSON.stringify({
-            model,
-            messages: [{ role: "user", content: prompt }],
-            temperature: 0.8,
-            max_tokens: 4000,
-            stream: true,
-          }),
-        });
-        if (r.ok && r.body) {
-          // מזרימים את הטקסט ישר לדפדפן, כך שאין חריגה מזמן התגובה של Netlify
-          const enc = new TextEncoder(), dec = new TextDecoder();
-          const stream = new ReadableStream({
-            async start(ctrl) {
-              const rd = r.body.getReader();
-              let buf = "";
-              try {
-                for (;;) {
-                  const { done, value } = await rd.read();
-                  if (done) break;
-                  buf += dec.decode(value, { stream: true });
-                  const lines = buf.split("\n");
-                  buf = lines.pop();
-                  for (const ln of lines) {
-                    const t0 = ln.trim();
-                    if (!t0.startsWith("data:")) continue;
-                    const payload = t0.slice(5).trim();
-                    if (payload === "[DONE]") continue;
-                    try {
-                      const t = JSON.parse(payload).choices?.[0]?.delta?.content;
-                      if (t) ctrl.enqueue(enc.encode(t));
-                    } catch {}
+    for (const model of MODELS) {
+      for (const cfg of okCfg ? [okCfg] : CFGS) {
+        for (let attempt = 0; attempt < 2; attempt++) {
+          const r = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse`,
+            { method: "POST", headers: { "Content-Type": "application/json", "x-goog-api-key": key }, body: mk(cfg) }
+          );
+          if (r.ok && r.body) {
+            okCfg = cfg;
+            // מזרימים את הטקסט ישר לדפדפן, כך שאין חריגה מזמן התגובה של Netlify
+            const enc = new TextEncoder(), dec = new TextDecoder();
+            const stream = new ReadableStream({
+              async start(ctrl) {
+                const rd = r.body.getReader();
+                let buf = "";
+                try {
+                  for (;;) {
+                    const { done, value } = await rd.read();
+                    if (done) break;
+                    buf += dec.decode(value, { stream: true });
+                    const lines = buf.split("\n");
+                    buf = lines.pop();
+                    for (const ln of lines) {
+                      if (!ln.startsWith("data:")) continue;
+                      try {
+                        const d = JSON.parse(ln.slice(5));
+                        const t = (d.candidates?.[0]?.content?.parts || []).map((x) => x.text || "").join("");
+                        if (t) ctrl.enqueue(enc.encode(t));
+                      } catch {}
+                    }
                   }
-                }
-              } catch {}
-              ctrl.close();
-            },
-          });
-          return new Response(stream, {
-            headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-cache" },
-          });
+                } catch {}
+                ctrl.close();
+              },
+            });
+            return new Response(stream, {
+              headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-cache" },
+            });
+          }
+          lastStatus = r.status;
+          try { lastWhy = (await r.json())?.error?.message || ""; } catch { lastWhy = ""; }
+          if (r.status === 503 || r.status === 500) { await new Promise((ok) => setTimeout(ok, 400)); continue; }
+          break;
         }
-        lastStatus = r.status;
-        try {
-          const e = await r.json();
-          lastWhy = String(e?.detail || e?.error?.message || e?.message || "");
-        } catch { lastWhy = ""; }
-        if (r.status >= 500) { await new Promise((ok) => setTimeout(ok, 400)); continue; }
-        break;
+        // רק שגיאת 400 על הגדרת החשיבה מצדיקה ניסיון עם הגדרה אחרת
+        if (lastStatus !== 400 || /API key|permission/i.test(lastWhy)) break;
       }
-      if (lastStatus === 401 || lastStatus === 403) break; // מפתח לא תקין: אין טעם לנסות מודל אחר
+      if (/API key/i.test(lastWhy) || lastStatus === 403) break;
     }
-    if (lastStatus === 401 || lastStatus === 403) return json({ error: "מפתח NVIDIA לא תקין או לא פעיל. צרו מפתח חדש ב-build.nvidia.com, הדביקו ב-Netlify ועשו Deploy. (" + lastStatus + ")" }, 502);
-    if (lastStatus === 429) return json({ error: "האתר עמוס כרגע (המכסה החינמית נגמרה לדקה הזו). נסו שוב בעוד כמה דקות." }, 429);
-    if (lastStatus === 404) return json({ error: "שם המודל לא נמצא. בדקו שם מודל ב-build.nvidia.com/models והגדירו אותו במשתנה NVIDIA_MODEL ב-Netlify." }, 502);
+    if (lastStatus === 429) return json({ error: "האתר עמוס כרגע (המכסה החינמית של היום או הדקה נגמרה). נסו שוב בעוד כמה דקות." }, 429);
+    if (lastStatus === 400 || lastStatus === 403) return json({ error: "המפתח של Gemini לא תקין או לא פעיל. צרו מפתח חדש ב-AI Studio, הדביקו ב-Netlify ועשו Deploy. (" + lastStatus + ") " + lastWhy.slice(0, 150) }, 502);
     return json({ error: "שגיאה בשירות ה-AI (" + lastStatus + "). נסו שוב. " + lastWhy.slice(0, 150) }, 502);
   } catch {
     return json({ error: "משהו השתבש בחיבור ל-AI, נסו שוב." }, 500);
