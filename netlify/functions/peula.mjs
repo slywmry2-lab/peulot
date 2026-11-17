@@ -1,7 +1,7 @@
 // Netlify Function: בונה פעולות עם Gemini (מסלול חינמי)
 // המפתח נשמר ב-Netlify כמשתנה סביבה בשם GEMINI_API_KEY, לא בקוד.
 
-const MODELS = ["gemini-flash-latest", "gemini-flash-lite-latest"]; // אם הראשון לא זמין, עובר לגיבוי
+const MODELS = ["gemini-flash-lite-latest", "gemini-flash-latest"]; // הראשון מהיר יותר, השני חכם יותר. אפשר לקבוע מודל במשתנה GEMINI_MODEL ב-Netlify. // אם הראשון לא זמין, עובר לגיבוי
 const GUIDE = `אתה מדריך ותיק בתנועת נוער בישראל שכותב מערכי פעולה כמו בנאדם: בגוף ראשון, כמו שמדריך באמת מתכנן את הפעולה שלו לעצמו ולצוות. לא כמו מסמך רשמי ולא כמו בינה מלאכותית.
 
 כללי כתיבה:
@@ -16,7 +16,7 @@ const GUIDE = `אתה מדריך ותיק בתנועת נוער בישראל ש�
 - תכנן את הזרימה: רעיון מרכזי אחד שחוזר בכל הבלוקים, ומעבר טבעי בין בלוק לבלוק.
 - כל משחק חייב להתאים למספר החניכים ולמקום ולהיות באמת אפשרי להעברה. העדף משחקים מוכרים ומוכחים בתנועות נוער והסבר אותם עד הסוף.
 - בלי קלישאות ובלי משפטים כלליים: בכל מתודה משהו מעשי שהמדריך יכול לומר או לעשות מיד.
-- אורך: עד כ-12 מילים לכל דקה של פעולה, בלי למלא.
+- אורך: עד כ-9 מילים לכל דקה של פעולה, בלי למלא.
 - בלי הקדמות, התנצלויות או הערות על עצמך. רק את הפעולה.
 
 פורמט הפלט (markdown): שורה ראשונה "# שם הפעולה", אחריה **נושא**, **שאלה מרכזית**, **מטרות** ו-**ציוד**, ואז כל בלוק ככותרת "## 🫡 זמן מפקד: התכנסות (10 דקות)" ומתחתיו שורות בפורמט "**מתודה 1 (10 דקות):** טקסט".
@@ -95,12 +95,12 @@ export default async (req) => {
   const mk = (cfg) =>
     JSON.stringify({
       contents: [{ role: "user", parts: [{ text: prompt }] }],
-      generationConfig: { maxOutputTokens: 6000, temperature: 0.8, ...cfg },
+      generationConfig: { maxOutputTokens: 3500, temperature: 0.8, ...cfg },
     });
 
   let lastStatus = 0, lastWhy = "";
   try {
-    for (const model of MODELS) {
+    for (const model of [process.env.GEMINI_MODEL, ...MODELS].filter((m, n, a) => m && a.indexOf(m) === n)) {
       for (const cfg of okCfg ? [okCfg] : CFGS) {
         for (let attempt = 0; attempt < 2; attempt++) {
           const r = await fetch(
